@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "start": "node server/index.js",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "server:dev": "cd server && node --watch index.js"
+    "server:dev": "cd server && node --watch index.js",
+    "prod": "npm run build && npm start"
   },
   "dependencies": {
     "autoprefixer": "^10.4.24",

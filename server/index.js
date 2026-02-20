@@ -1,10 +1,74 @@
 import { createServer } from 'http'
 import { Server } from 'socket.io'
+import { readFile } from 'fs/promises'
+import { existsSync } from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const MIME = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
+  '.webmanifest': 'application/manifest+json'
+}
+
+function getDistPath() {
+  const fromRoot = path.join(process.cwd(), 'dist')
+  if (existsSync(fromRoot)) return fromRoot
+  const fromServer = path.join(__dirname, '..', 'dist')
+  if (existsSync(fromServer)) return fromServer
+  return null
+}
+
+async function serveStatic(req, res, distPath) {
+  const pathname = new URL(req.url || '/', 'http://x').pathname
+  const subPath = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '').replace(/\.\./g, '')
+  const resolved = path.resolve(distPath, subPath)
+  const distResolved = path.resolve(distPath)
+  if (!resolved.startsWith(distResolved)) {
+    res.writeHead(403).end()
+    return
+  }
+  const safe = resolved
+  const { statSync } = await import('fs')
+  let filePath = safe
+  try {
+    if (!existsSync(safe) || !statSync(safe).isFile()) filePath = path.resolve(distPath, 'index.html')
+  } catch {
+    filePath = path.join(distPath, 'index.html')
+  }
+  const ext = path.extname(filePath)
+  const contentType = MIME[ext] || 'application/octet-stream'
+  try {
+    const data = await readFile(filePath)
+    res.writeHead(200, { 'Content-Type': contentType }).end(data)
+  } catch {
+    res.writeHead(404).end('Not found')
+  }
+}
 
 const httpServer = createServer()
 const io = new Server(httpServer, {
   cors: { origin: '*' }
 })
+
+const distPath = getDistPath()
+if (distPath) {
+  httpServer.on('request', (req, res) => {
+    if (req.url && req.url.startsWith('/socket.io')) return
+    serveStatic(req, res, distPath)
+  })
+}
 
 const rooms = new Map() // roomCode -> { gameType, players, gameState, hostId }
 
@@ -479,5 +543,7 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3001
 httpServer.listen(PORT, () => {
-  console.log(`Socket server running on port ${PORT}`)
+  console.log(`Server running on port ${PORT}`)
+  if (distPath) console.log('Serving static from:', distPath)
+  else console.log('No dist/ found – run "npm run build" then "npm start" for production')
 })
