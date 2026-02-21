@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { Button } from '@/components/ui/button'
 import { RoomManager } from '@/components/RoomManager'
 import { LotoNumber } from '@/components/LotoNumber'
 import { useSocket } from '@/context/useSocket'
 import { useSpeakNumber } from '@/hooks/useSpeakNumber'
-import { Volume2, VolumeX, RotateCcw, MousePointer2, Zap, Square, Minus, Plus } from 'lucide-react'
+import { Volume2, VolumeX, RotateCcw, MousePointer2, Zap, Square, Minus, Plus, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import useEmblaCarousel from 'embla-carousel-react'
 
 const TICKET_COLORS: Record<string, { bg: string; border: string }> = {
   blue: { bg: 'bg-blue-100 dark:bg-blue-900/30', border: 'border-blue-500' },
@@ -45,6 +46,7 @@ function LotoGame() {
     const saved = localStorage.getItem('loto-number-size')
     return saved ? parseInt(saved, 10) : 0
   })
+  const [isMobile, setIsMobile] = useState(false)
   const lastSpokenRef = useRef<number | null>(null)
   const lastAnnouncedWinnersRef = useRef<string>('')
   const prevAutoMarkRef = useRef<boolean>(true)
@@ -84,6 +86,16 @@ function LotoGame() {
     ticketPool.length > 0 && Array.isArray(myTickets) && myTickets.length > 0
   // BẮT BUỘC chọn vé từ danh sách trước khi vào game - không tự động chọn
   const mustSelectTickets = ticketPool.length > 0 && !hasSelectedTickets
+
+  // Detect mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Reset ref khi reset bàn (0 số đã bốc) để lần bốc tiếp theo đọc đúng và có thể đọc tên người thắng ván mới
   useEffect(() => {
@@ -307,34 +319,137 @@ function LotoGame() {
 
       {hasSelectedTickets && myTickets && myTickets.length > 0 && (
         <div className="space-y-3 sm:space-y-4 min-w-0">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <h3 className="text-base sm:text-lg font-semibold">Vé của bạn</h3>
-            {drawnNumbers.length === 0 && (
-              <Button variant="outline" size="sm" onClick={handleClearTickets}>
-                Chọn lại vé
-              </Button>
-            )}
+          {!isMobile && (
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <h3 className="text-base sm:text-lg font-semibold">Vé của bạn</h3>
+              {drawnNumbers.length === 0 && (
+                <Button variant="outline" size="sm" onClick={handleClearTickets}>
+                  Chọn lại vé
+                </Button>
+              )}
+            </div>
+          )}
+          
+          {/* Mobile: Carousel */}
+          {isMobile ? (
+            <TicketCarousel
+              tickets={myTickets as { color: string; grid?: (number | null)[][] }[]}
+              colors={TICKET_COLORS}
+              isMarked={isMarked}
+              toggleManualMark={toggleManualMark}
+              autoMark={autoMark}
+            />
+          ) : (
+            /* Desktop: Grid layout */
+            <div className="flex flex-wrap justify-center gap-3 sm:gap-6 overflow-x-auto pb-2">
+              {(myTickets as { color: string; grid?: (number | null)[][] }[]).map((ticket, ti) => {
+                const ticketKey = `${ticket.color}-${ti}`
+                const ticketColors = TICKET_COLORS[ticket.color] || { bg: 'bg-gray-100 dark:bg-gray-800', border: 'border-gray-400' }
+                return (
+                  <TicketCard
+                    key={ticketKey}
+                    ticket={ticket}
+                    ticketKey={ticketKey}
+                    colors={ticketColors}
+                    cellWidth={30}
+                    cellHeight={80}
+                    isMarked={isMarked}
+                    toggleManualMark={toggleManualMark}
+                    autoMark={autoMark}
+                    isMobile={false}
+                  />
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Component TicketCard để render từng vé
+function TicketCard({
+  ticket,
+  ticketKey,
+  colors,
+  cellWidth,
+  cellHeight,
+  isMarked,
+  toggleManualMark,
+  autoMark,
+  isMobile = false,
+}: {
+  ticket: { color: string; grid?: (number | null)[][] }
+  ticketKey: string
+  colors: { bg: string; border: string }
+  cellWidth: number
+  cellHeight: number
+  isMarked: (num: number | null, ticketKey: string) => boolean
+  toggleManualMark: (key: string) => void
+  autoMark: boolean
+  isMobile?: boolean
+}) {
+  const grid = ticket.grid || []
+  const ticketWidth = isMobile ? '100%' : cellWidth * 9 + 24 // 24 = border + padding
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+        "border-2 p-0 bg-white flex flex-col shadow-md",
+        colors.border,
+        "flex-shrink-0"
+      )}
+      style={{ width: ticketWidth }}
+    >
+      {/* Hình số 1: Khoảng trắng trên cùng với text TÂN TÂN và hoa văn */}
+      <div className="bg-white py-2 border-b border-black w-full">
+        <div className="flex items-center justify-center gap-2 relative">
+          <div className="absolute inset-0 flex items-center justify-center gap-1">
+            {Array.from({ length: 200 }).map((_, i) => (
+              <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                <path
+                  d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                  fill="currentColor"
+                />
+              </svg>
+            ))}
           </div>
-          <div className="flex flex-wrap justify-center gap-3 sm:gap-6 overflow-x-auto pb-2">
-            {(myTickets as { color: string; grid?: (number | null)[][] }[]).map((ticket, ti) => {
-              const grid = ticket.grid || []
-              const ticketKey = `${ticket.color}-${ti}`
-              const colors = TICKET_COLORS[ticket.color] || { bg: 'bg-gray-100 dark:bg-gray-800', border: 'border-gray-400' }
-              const cellWidth = 20
-              const cellHeight = 40
-              return (
-                <motion.div
-                  key={ticketKey}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`border-2 p-0 bg-white ${colors.border} flex flex-col shadow-md w-auto`}
-                >
-                  {/* Hình số 1: Khoảng trắng trên cùng với text TÂN TÂN và hoa văn */}
-                  <div className="bg-white py-0 w-full">
-                    <div className="flex items-center justify-center gap-2 relative">
-                      <div className="absolute inset-1 flex items-center justify-center gap-1">
-                        {Array.from({ length: 200 }).map((_, i) => (
-                          <svg key={i} width="12" height="12" viewBox="0 0 12 12" className="text-yellow-500">
+          <span className="font-bold text-lg relative z-10 bg-white px-2">TÂN TÂN</span>
+        </div>
+      </div>
+      <div className="flex relative w-full">
+        {/* Hình số 2: Khoảng trắng trái với hoa văn dọc */}
+        <div className="bg-white border-r border-black flex flex-col items-center justify-center relative overflow-hidden" style={{ width: '12px' }}>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 py-1">
+            {Array.from({ length: Math.ceil((grid.length * cellHeight) / 8) }).map((_, i) => (
+              <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                <path
+                  d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                  fill="currentColor"
+                />
+              </svg>
+            ))}
+          </div>
+        </div>
+        {/* Grid content */}
+        <div className="flex flex-col flex-1">
+          {Array.from({ length: 3 }).map((_, blockIdx) => {
+            const startRow = blockIdx * 3
+            const endRow = Math.min(startRow + 3, grid.length)
+            const blockRows = grid.slice(startRow, endRow)
+            return (
+              <div key={`${ticketKey}-block-${blockIdx}`} className="flex flex-col">
+                {/* Hình số 3: Khoảng trắng giữa các block với hoa văn */}
+                {blockIdx > 0 && (
+                  <div className="bg-white flex items-center justify-center relative overflow-hidden border-y border-black w-full" style={{ height: '12px' }}>
+                    <div className="absolute inset-0 flex items-center justify-center gap-1">
+                      {/* Hoa văn bên trái */}
+                      <div className="flex items-center gap-1 flex-1 justify-end pr-2">
+                        {Array.from({ length: Math.ceil(50) }).map((_, i) => (
+                          <svg key={`left-${i}`} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
                             <path
                               d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
                               fill="currentColor"
@@ -342,147 +457,240 @@ function LotoGame() {
                           </svg>
                         ))}
                       </div>
-                      <span className="font-bold text-[8px] relative z-10 bg-white px-2">TÂN TÂN</span>
+                      {/* Text ở giữa */}
+                      <span className="text-yellow-500 font-semibold text-xs relative z-10 bg-white px-2 whitespace-nowrap" style={{ fontFamily: 'cursive' }}>
+                        Mã đáo thành công
+                      </span>
+                      {/* Hoa văn bên phải */}
+                      <div className="flex items-center gap-1 flex-1 justify-start pl-2">
+                        {Array.from({ length: Math.ceil(50) }).map((_, i) => (
+                          <svg key={`right-${i}`} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                            <path
+                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex relative w-full">
-                    {/* Hình số 2: Khoảng trắng trái với hoa văn dọc */}
-                    <div className="bg-white  flex flex-col items-center justify-center relative overflow-hidden" style={{ width: '12px' }}>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 py-1">
-                        {Array.from({ length: Math.ceil((grid.length * cellHeight) / 8) }).map((_, i) => (
-                          <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
-                            <path
-                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
-                              fill="currentColor"
-                            />
-                          </svg>
-                        ))}
-                      </div>
-                    </div>
-                    {/* Grid content */}
-                    <div className="flex flex-col flex-1">
-                      {Array.from({ length: 3 }).map((_, blockIdx) => {
-                        const startRow = blockIdx * 3
-                        const endRow = Math.min(startRow + 3, grid.length)
-                        const blockRows = grid.slice(startRow, endRow)
+                )}
+                <div className="border border-black" style={{ borderWidth: '1px', width: isMobile ? '100%' : cellWidth * 9 }}>
+                  <div className="grid grid-cols-9" style={{ gap: 0, width: isMobile ? '100%' : cellWidth * 9 }}>
+                    {blockRows.map((row, ri) =>
+                      (row || []).map((cell, ci) => {
+                        const actualRowIdx = startRow + ri
+                        const isFirstRow = ri === 0
+                        const isFirstCol = ci === 0
                         return (
-                          <div key={`${ticketKey}-block-${blockIdx}`} className="flex flex-col">
-                            {/* Hình số 3: Khoảng trắng giữa các block với hoa văn */}
-                            {blockIdx > 0 && (
-                              <div className="bg-white flex items-center justify-center relative overflow-hidden border-y border-black w-full" style={{ height: '12px' }}>
-                                <div className="absolute inset-0 flex items-center justify-center gap-1">
-                                  {/* Hoa văn bên trái */}
-                                  <div className="flex items-center gap-1 flex-1 justify-end pr-2">
-                                    {Array.from({ length: Math.ceil(50) }).map((_, i) => (
-                                      <svg key={`left-${i}`} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
-                                        <path
-                                          d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
-                                          fill="currentColor"
-                                        />
-                                      </svg>
-                                    ))}
-                                  </div>
-                                  {/* Text ở giữa */}
-                                  <span className="text-yellow-500 font-semibold text-xs relative z-10 bg-white px-2 whitespace-nowrap" style={{ fontFamily: 'cursive' }}>
-                                    Mã đáo thành công
-                                  </span>
-                                  {/* Hoa văn bên phải */}
-                                  <div className="flex items-center gap-1 flex-1 justify-start pl-2">
-                                    {Array.from({ length: Math.ceil(50) }).map((_, i) => (
-                                      <svg key={`right-${i}`} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
-                                        <path
-                                          d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
-                                          fill="currentColor"
-                                        />
-                                      </svg>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
+                          <div
+                            key={`${ticketKey}-${actualRowIdx}-${ci}`}
+                            className={cn(
+                              "flex items-center justify-center box-border border border-black",
+                              typeof cell === 'number' && isMarked(cell, ticketKey) 
+                                ? 'bg-primary text-primary-foreground' 
+                                : 'bg-white'
                             )}
-                            <div className="border border-black" style={{ borderWidth: '1px', width: cellWidth * 9 }}>
-                              <div className="grid grid-cols-9" style={{ gap: 0, width: cellWidth * 9 }}>
-                                {blockRows.map((row, ri) =>
-                                  (row || []).map((cell, ci) => {
-                                    const actualRowIdx = startRow + ri
-                                    const isFirstRow = ri === 0
-                                    const isFirstCol = ci === 0
-                                    return (
-                                      <div
-                                        key={`${ticketKey}-${actualRowIdx}-${ci}`}
-                                        className={cn(
-                                          "flex items-center justify-center box-border border border-black",
-                                          typeof cell === 'number' && isMarked(cell, ticketKey) 
-                                            ? 'bg-primary text-primary-foreground' 
-                                            : 'bg-white'
-                                        )}
-                                        style={{
-                                          width: cellWidth,
-                                          height: cellHeight,
-                                          margin: 0,
-                                          padding: 0,
-                                          marginTop: isFirstRow ? 0 : '-1px',
-                                          marginLeft: isFirstCol ? 0 : '-1px'
-                                        }}
-                                      >
-                                        {typeof cell === 'number' ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => toggleManualMark(`${ticketKey}-${cell}`)}
-                                            className={`flex items-center justify-center w-full h-full ${!autoMark ? 'cursor-pointer' : 'cursor-default'}`}
-                                            disabled={autoMark}
-                                            style={{ margin: 0, padding: 0 }}
-                                          >
-                                            <LotoNumber
-                                              number={cell}
-                                              drawn={isMarked(cell, ticketKey)}
-                                              size="xs"
-                                            />
-                                          </button>
-                                        ) : (
-                                          <span className={`w-full h-full box-border ${colors.bg}`} style={{ margin: 0, padding: 0 }} />
-                                        )}
-                                      </div>
-                                    )
-                                  })
-                                )}
-                              </div>
-                            </div>
+                            style={{
+                              width: isMobile ? '100%' : cellWidth,
+                              height: isMobile ? cellHeight : cellHeight,
+                              margin: 0,
+                              padding: 0,
+                              marginTop: isFirstRow ? 0 : '-1px',
+                              marginLeft: isFirstCol ? 0 : '-1px'
+                            }}
+                          >
+                            {typeof cell === 'number' ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleManualMark(`${ticketKey}-${cell}`)}
+                                className={`flex items-center justify-center w-full h-full ${!autoMark ? 'cursor-pointer' : 'cursor-default'}`}
+                                disabled={autoMark}
+                                style={{ margin: 0, padding: 0 }}
+                              >
+                                <LotoNumber
+                                  number={cell}
+                                  drawn={isMarked(cell, ticketKey)}
+                                  size="xs"
+                                />
+                              </button>
+                            ) : (
+                              <span className={`w-full h-full box-border ${colors.bg}`} style={{ margin: 0, padding: 0 }} />
+                            )}
                           </div>
                         )
-                      })}
-                    </div>
-                    {/* Hình số 2: Khoảng trắng phải với hoa văn dọc */}
-                    <div className="bg-white  flex flex-col items-center justify-center relative overflow-hidden" style={{ width: '12px' }}>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 py-1">
-                        {Array.from({ length: Math.ceil((grid.length * cellHeight) / 8) }).map((_, i) => (
-                          <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
-                            <path
-                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
-                              fill="currentColor"
-                            />
-                          </svg>
-                        ))}
-                      </div>
-                    </div>
+                      })
+                    )}
                   </div>
-                  {/* Hình số 4: Khoảng trắng dưới cùng với text TÂN TÂN TỐT NHẤT và hoa văn */}
-                  <div className="bg-white py-0 w-full">
-                    <div className="flex items-center justify-center gap-2 relative">
-                      <div className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden">
-                        {Array.from({ length: Math.ceil(100) }).map((_, i) => (
-                          <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
-                            <path
-                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
-                              fill="currentColor"
-                            />
-                          </svg>
-                        ))}
-                      </div>
-                      <span className="font-bold text-[8px] relative z-10 bg-white px-2">TÂN TÂN TỐT NHẤT</span>
-                    </div>
-                  </div>
-                </motion.div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {/* Hình số 2: Khoảng trắng phải với hoa văn dọc */}
+        <div className="bg-white border-l border-black flex flex-col items-center justify-center relative overflow-hidden" style={{ width: '12px' }}>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 py-1">
+            {Array.from({ length: Math.ceil((grid.length * cellHeight) / 8) }).map((_, i) => (
+              <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                <path
+                  d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                  fill="currentColor"
+                />
+              </svg>
+            ))}
+          </div>
+        </div>
+      </div>
+      {/* Hình số 4: Khoảng trắng dưới cùng với text TÂN TÂN TỐT NHẤT và hoa văn */}
+      <div className="bg-white py-2 border-t border-black w-full">
+        <div className="flex items-center justify-center gap-2 relative">
+          <div className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden">
+            {Array.from({ length: Math.ceil(100) }).map((_, i) => (
+              <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                <path
+                  d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                  fill="currentColor"
+                />
+              </svg>
+            ))}
+          </div>
+          <span className="font-bold text-lg relative z-10 bg-white px-2">TÂN TÂN TỐT NHẤT</span>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+// Component TicketCarousel cho mobile
+function TicketCarousel({
+  tickets,
+  colors,
+  isMarked,
+  toggleManualMark,
+  autoMark,
+}: {
+  tickets: { color: string; grid?: (number | null)[][] }[]
+  colors: Record<string, { bg: string; border: string }>
+  isMarked: (num: number | null, ticketKey: string) => boolean
+  toggleManualMark: (key: string) => void
+  autoMark: boolean
+}) {
+  const [emblaRef, emblaApi] = useEmblaCarousel({ loop: false, align: 'start' })
+  const [prevBtnEnabled, setPrevBtnEnabled] = useState(false)
+  const [nextBtnEnabled, setNextBtnEnabled] = useState(false)
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [dimensions, setDimensions] = useState({ cellWidth: 0, cellHeight: 0 })
+
+  const scrollPrev = useCallback(() => {
+    if (emblaApi) emblaApi.scrollPrev()
+  }, [emblaApi])
+
+  const scrollNext = useCallback(() => {
+    if (emblaApi) emblaApi.scrollNext()
+  }, [emblaApi])
+
+  const onSelect = useCallback(() => {
+    if (!emblaApi) return
+    setSelectedIndex(emblaApi.selectedScrollSnap())
+    setPrevBtnEnabled(emblaApi.canScrollPrev())
+    setNextBtnEnabled(emblaApi.canScrollNext())
+  }, [emblaApi])
+
+  useEffect(() => {
+    if (!emblaApi) return
+    queueMicrotask(() => onSelect())
+    emblaApi.on('select', onSelect)
+    emblaApi.on('reInit', onSelect)
+  }, [emblaApi, onSelect])
+
+  // Tính toán cellWidth và cellHeight động để vừa màn hình
+  useEffect(() => {
+    const calculateDimensions = () => {
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      
+      // Tính chiều cao các phần cố định của vé
+      const headerHeight = 50 // py-2 + border + text
+      const footerHeight = 50 // py-2 + border + text
+      const gapBetweenBlocks = 12 * 2 // 2 khoảng trắng giữa 3 blocks
+      const ticketBorder = 4 // border top + bottom
+      const fixedHeight = headerHeight + footerHeight + gapBetweenBlocks + ticketBorder
+      
+      // Trừ đi các phần khác (drawn numbers ~60px, navigation ~50px, spacing ~30px)
+      const otherElementsHeight = 140
+      
+      // Chiều cao còn lại cho grid (9 rows)
+      const availableHeight = viewportHeight - fixedHeight - otherElementsHeight
+      const cellHeight = Math.max(20, Math.floor(availableHeight / 9)) // Tối thiểu 20px
+      
+      // Tính cellWidth từ viewport
+      const sideBorderWidth = 12 * 2 // 2 bên hoa văn
+      const ticketBorderWidth = 4 // border của vé
+      const availableWidth = viewportWidth - sideBorderWidth - ticketBorderWidth - 16 // padding của slide
+      const cellWidth = Math.floor(availableWidth / 9) // 9 cột
+      
+      setDimensions({ cellWidth, cellHeight })
+    }
+    
+    calculateDimensions()
+    window.addEventListener('resize', calculateDimensions)
+    window.addEventListener('orientationchange', calculateDimensions)
+    
+    return () => {
+      window.removeEventListener('resize', calculateDimensions)
+      window.removeEventListener('orientationchange', calculateDimensions)
+    }
+  }, [])
+
+  const { cellWidth, cellHeight } = dimensions
+
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between mb-2 px-2">
+        <h3 className="text-base font-semibold">Vé của bạn ({selectedIndex + 1}/{tickets.length})</h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={scrollPrev}
+            disabled={!prevBtnEnabled}
+            className={cn(
+              "p-1 rounded-full border",
+              prevBtnEnabled ? "hover:bg-muted cursor-pointer" : "opacity-50 cursor-not-allowed"
+            )}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <button
+            onClick={scrollNext}
+            disabled={!nextBtnEnabled}
+            className={cn(
+              "p-1 rounded-full border",
+              nextBtnEnabled ? "hover:bg-muted cursor-pointer" : "opacity-50 cursor-not-allowed"
+            )}
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      {cellWidth > 0 && cellHeight > 0 && (
+        <div className="overflow-hidden" ref={emblaRef}>
+          <div className="flex">
+            {tickets.map((ticket, ti) => {
+              const ticketKey = `${ticket.color}-${ti}`
+              const ticketColors = colors[ticket.color] || { bg: 'bg-gray-100 dark:bg-gray-800', border: 'border-gray-400' }
+              return (
+                <div key={ticketKey} className="flex-[0_0_100%] min-w-0 px-2">
+                  <TicketCard
+                    ticket={ticket}
+                    ticketKey={ticketKey}
+                    colors={ticketColors}
+                    cellWidth={cellWidth}
+                    cellHeight={cellHeight}
+                    isMarked={isMarked}
+                    toggleManualMark={toggleManualMark}
+                    autoMark={autoMark}
+                    isMobile={true}
+                  />
+                </div>
               )
             })}
           </div>
