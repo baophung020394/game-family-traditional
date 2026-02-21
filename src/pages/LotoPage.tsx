@@ -5,7 +5,8 @@ import { RoomManager } from '@/components/RoomManager'
 import { LotoNumber } from '@/components/LotoNumber'
 import { useSocket } from '@/context/useSocket'
 import { useSpeakNumber } from '@/hooks/useSpeakNumber'
-import { Volume2, RotateCcw, MousePointer2, Zap, Square } from 'lucide-react'
+import { Volume2, VolumeX, RotateCcw, MousePointer2, Zap, Square, Minus, Plus } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 const TICKET_COLORS: Record<string, { bg: string; border: string }> = {
   blue: { bg: 'bg-blue-100 dark:bg-blue-900/30', border: 'border-blue-500' },
@@ -39,9 +40,29 @@ function LotoGame() {
   const [autoMark, setAutoMark] = useState(true)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [manualMarked, setManualMarked] = useState<Set<string>>(new Set())
+  const [muted, setMuted] = useState(false)
+  const [numberSizeLevel, setNumberSizeLevel] = useState<number>(() => {
+    const saved = localStorage.getItem('loto-number-size')
+    return saved ? parseInt(saved, 10) : 0
+  })
   const lastSpokenRef = useRef<number | null>(null)
   const lastAnnouncedWinnersRef = useRef<string>('')
   const prevAutoMarkRef = useRef<boolean>(true)
+
+  // Load number size from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('loto-number-size')
+    if (saved) {
+      queueMicrotask(() => setNumberSizeLevel(parseInt(saved, 10)))
+    }
+  }, [])
+
+  // Save number size to localStorage
+  const handleSetNumberSize = (level: number) => {
+    const clamped = Math.max(0, Math.min(2, level))
+    setNumberSizeLevel(clamped)
+    localStorage.setItem('loto-number-size', clamped.toString())
+  }
 
   const gs = roomState?.gameState as {
     drawnNumbers?: number[]
@@ -77,9 +98,10 @@ function LotoGame() {
     const lastDrawn = gs?.lastDrawn
     if (typeof lastDrawn !== 'number') return
     if (lastSpokenRef.current === lastDrawn) return
+    if (muted) return
     lastSpokenRef.current = lastDrawn
     speak(lastDrawn).then(() => setIsSpeaking(false))
-  }, [gs?.lastDrawn, speak])
+  }, [gs?.lastDrawn, speak, muted])
 
   // Khi chuyển từ Tự điền sang Tự bấm: giữ lại các ô đã đánh dấu (đồng bộ drawnNumbers vào manualMarked)
   useEffect(() => {
@@ -96,13 +118,13 @@ function LotoGame() {
           })
         })
       })
-      setManualMarked(next)
+      queueMicrotask(() => setManualMarked(next))
     }
   }, [autoMark, myTickets, drawnNumbers])
 
   // Khi có người KINH: đọc tên người thắng bằng giọng nói (chỉ đọc một lần cho mỗi lần kết thúc ván)
   useEffect(() => {
-    if (!gameEnded || !kinhWinners?.length || !roomState?.players) return
+    if (!gameEnded || !kinhWinners?.length || !roomState?.players || muted) return
     const key = kinhWinners.slice().sort().join(',')
     if (lastAnnouncedWinnersRef.current === key) return
     lastAnnouncedWinnersRef.current = key
@@ -111,7 +133,7 @@ function LotoGame() {
       .join(', ')
     const text = names ? `Chúc mừng ${names} đã KINH!` : 'KINH!'
     speakText(text)
-  }, [gameEnded, kinhWinners, roomState?.players, speakText])
+  }, [gameEnded, kinhWinners, roomState?.players, speakText, muted])
 
   const handleSelectTickets = (indices: number[]) => {
     socket?.emit('loto-select-tickets', { selectedIndices: indices })
@@ -147,9 +169,13 @@ function LotoGame() {
     })
   }
 
-  const isMarked = (num: number, ticketKey: string) => {
+  const isMarked = (num: number | null, ticketKey: string): boolean => {
+    if (num === null || typeof num !== 'number') return false
     const n = Number(num)
-    if (autoMark) return drawnNumbers.includes(n)
+    if (isNaN(n)) return false
+    if (autoMark) {
+      return drawnNumbers.some((drawn) => Number(drawn) === n)
+    }
     return manualMarked.has(`${ticketKey}-${num}`)
   }
 
@@ -198,11 +224,17 @@ function LotoGame() {
         </div>
       )}
 
-      <div className="flex justify-center items-center gap-4 flex-wrap">
-        <p className="text-sm text-muted-foreground flex items-center gap-1">
-          <Volume2 className="w-4 h-4" />
-          Đọc số bằng giọng nói
-        </p>
+      <div className="flex flex-wrap justify-center items-center gap-3 sm:gap-4">
+        <Button
+          variant={muted ? 'destructive' : 'outline'}
+          size="sm"
+          onClick={() => {
+            setMuted(!muted)
+            if (!muted) abort()
+          }}
+        >
+          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </Button>
         <label className="flex items-center gap-2 cursor-pointer">
           <span className="text-sm">Đánh dấu:</span>
           <div className="flex rounded-lg border overflow-hidden">
@@ -214,7 +246,7 @@ function LotoGame() {
               }`}
             >
               <Zap className="w-4 h-4" />
-              Tự động
+              Tự điền
             </button>
             <button
               type="button"
@@ -228,6 +260,25 @@ function LotoGame() {
             </button>
           </div>
         </label>
+        <div className="flex items-center gap-1 border rounded-lg overflow-hidden bg-muted/50">
+          <span className="text-xs sm:text-sm px-2 py-1.5 text-muted-foreground">Cỡ số:</span>
+          <button
+            type="button"
+            onClick={() => handleSetNumberSize(numberSizeLevel - 1)}
+            disabled={numberSizeLevel === 0}
+            className="p-1.5 hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Minus className="w-3 h-3 sm:w-4 sm:h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSetNumberSize(numberSizeLevel + 1)}
+            disabled={numberSizeLevel === 2}
+            className="p-1.5 hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
+          </button>
+        </div>
       </div>
 
       {gameEnded && (kinhWinners || []).length > 0 && (
@@ -249,62 +300,187 @@ function LotoGame() {
       <div className="flex flex-wrap gap-2 justify-center">
         <AnimatePresence>
           {(drawnNumbers || []).map((n) => (
-            <LotoNumber key={n} number={n} drawn size="md" />
+            <LotoNumber key={n} number={n} drawn size="md" variant="drawn" />
           ))}
         </AnimatePresence>
       </div>
 
       {hasSelectedTickets && myTickets && myTickets.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Vé của bạn</h3>
+        <div className="space-y-3 sm:space-y-4 min-w-0">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <h3 className="text-base sm:text-lg font-semibold">Vé của bạn</h3>
             {drawnNumbers.length === 0 && (
               <Button variant="outline" size="sm" onClick={handleClearTickets}>
                 Chọn lại vé
               </Button>
             )}
           </div>
-          <div className="flex flex-wrap justify-center gap-6">
+          <div className="flex flex-wrap justify-center gap-3 sm:gap-6 overflow-x-auto pb-2">
             {(myTickets as { color: string; grid?: (number | null)[][] }[]).map((ticket, ti) => {
               const grid = ticket.grid || []
               const ticketKey = `${ticket.color}-${ti}`
               const colors = TICKET_COLORS[ticket.color] || { bg: 'bg-gray-100 dark:bg-gray-800', border: 'border-gray-400' }
+              const cellWidth = 20
+              const cellHeight = 40
               return (
                 <motion.div
                   key={ticketKey}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`rounded-xl border-2 p-3 w-[232px] flex-shrink-0 ${colors.bg} ${colors.border} flex flex-col items-center shadow-md`}
+                  className={`border-2 p-0 bg-white ${colors.border} flex flex-col shadow-md w-auto`}
                 >
-                  <p className="text-sm font-semibold mb-3 text-center w-full">
-                    {TICKET_LABELS[ticket.color] || ticket.color}
-                  </p>
-                  <div className="grid grid-cols-9 gap-px w-[204px]">
-                    {(grid as (number | null)[][]).map((row, ri) =>
-                      (row || []).map((cell, ci) => (
-                        <div
-                          key={`${ticketKey}-${ri}-${ci}`}
-                          className="flex items-center justify-center w-[22px] h-[22px] box-border"
-                        >
-                          {typeof cell === 'number' ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleManualMark(`${ticketKey}-${cell}`)}
-                              className={`flex items-center justify-center w-full h-full ${!autoMark ? 'cursor-pointer' : 'cursor-default'}`}
-                              disabled={autoMark}
-                            >
-                              <LotoNumber
-                                number={cell}
-                                drawn={isMarked(cell, ticketKey)}
-                                size="xs"
-                              />
-                            </button>
-                          ) : (
-                            <span className="w-[22px] h-[22px] rounded-sm bg-white/50 dark:bg-black/10 box-border" />
-                          )}
-                        </div>
-                      ))
-                    )}
+                  {/* Hình số 1: Khoảng trắng trên cùng với text TÂN TÂN và hoa văn */}
+                  <div className="bg-white py-0 w-full">
+                    <div className="flex items-center justify-center gap-2 relative">
+                      <div className="absolute inset-1 flex items-center justify-center gap-1">
+                        {Array.from({ length: 200 }).map((_, i) => (
+                          <svg key={i} width="12" height="12" viewBox="0 0 12 12" className="text-yellow-500">
+                            <path
+                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        ))}
+                      </div>
+                      <span className="font-bold text-[8px] relative z-10 bg-white px-2">TÂN TÂN</span>
+                    </div>
+                  </div>
+                  <div className="flex relative w-full">
+                    {/* Hình số 2: Khoảng trắng trái với hoa văn dọc */}
+                    <div className="bg-white  flex flex-col items-center justify-center relative overflow-hidden" style={{ width: '12px' }}>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 py-1">
+                        {Array.from({ length: Math.ceil((grid.length * cellHeight) / 8) }).map((_, i) => (
+                          <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                            <path
+                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Grid content */}
+                    <div className="flex flex-col flex-1">
+                      {Array.from({ length: 3 }).map((_, blockIdx) => {
+                        const startRow = blockIdx * 3
+                        const endRow = Math.min(startRow + 3, grid.length)
+                        const blockRows = grid.slice(startRow, endRow)
+                        return (
+                          <div key={`${ticketKey}-block-${blockIdx}`} className="flex flex-col">
+                            {/* Hình số 3: Khoảng trắng giữa các block với hoa văn */}
+                            {blockIdx > 0 && (
+                              <div className="bg-white flex items-center justify-center relative overflow-hidden border-y border-black w-full" style={{ height: '12px' }}>
+                                <div className="absolute inset-0 flex items-center justify-center gap-1">
+                                  {/* Hoa văn bên trái */}
+                                  <div className="flex items-center gap-1 flex-1 justify-end pr-2">
+                                    {Array.from({ length: Math.ceil(50) }).map((_, i) => (
+                                      <svg key={`left-${i}`} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                                        <path
+                                          d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                                          fill="currentColor"
+                                        />
+                                      </svg>
+                                    ))}
+                                  </div>
+                                  {/* Text ở giữa */}
+                                  <span className="text-yellow-500 font-semibold text-xs relative z-10 bg-white px-2 whitespace-nowrap" style={{ fontFamily: 'cursive' }}>
+                                    Mã đáo thành công
+                                  </span>
+                                  {/* Hoa văn bên phải */}
+                                  <div className="flex items-center gap-1 flex-1 justify-start pl-2">
+                                    {Array.from({ length: Math.ceil(50) }).map((_, i) => (
+                                      <svg key={`right-${i}`} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                                        <path
+                                          d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                                          fill="currentColor"
+                                        />
+                                      </svg>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            <div className="border border-black" style={{ borderWidth: '1px', width: cellWidth * 9 }}>
+                              <div className="grid grid-cols-9" style={{ gap: 0, width: cellWidth * 9 }}>
+                                {blockRows.map((row, ri) =>
+                                  (row || []).map((cell, ci) => {
+                                    const actualRowIdx = startRow + ri
+                                    const isFirstRow = ri === 0
+                                    const isFirstCol = ci === 0
+                                    return (
+                                      <div
+                                        key={`${ticketKey}-${actualRowIdx}-${ci}`}
+                                        className={cn(
+                                          "flex items-center justify-center box-border border border-black",
+                                          typeof cell === 'number' && isMarked(cell, ticketKey) 
+                                            ? 'bg-primary text-primary-foreground' 
+                                            : 'bg-white'
+                                        )}
+                                        style={{
+                                          width: cellWidth,
+                                          height: cellHeight,
+                                          margin: 0,
+                                          padding: 0,
+                                          marginTop: isFirstRow ? 0 : '-1px',
+                                          marginLeft: isFirstCol ? 0 : '-1px'
+                                        }}
+                                      >
+                                        {typeof cell === 'number' ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleManualMark(`${ticketKey}-${cell}`)}
+                                            className={`flex items-center justify-center w-full h-full ${!autoMark ? 'cursor-pointer' : 'cursor-default'}`}
+                                            disabled={autoMark}
+                                            style={{ margin: 0, padding: 0 }}
+                                          >
+                                            <LotoNumber
+                                              number={cell}
+                                              drawn={isMarked(cell, ticketKey)}
+                                              size="xs"
+                                            />
+                                          </button>
+                                        ) : (
+                                          <span className={`w-full h-full box-border ${colors.bg}`} style={{ margin: 0, padding: 0 }} />
+                                        )}
+                                      </div>
+                                    )
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {/* Hình số 2: Khoảng trắng phải với hoa văn dọc */}
+                    <div className="bg-white  flex flex-col items-center justify-center relative overflow-hidden" style={{ width: '12px' }}>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 py-1">
+                        {Array.from({ length: Math.ceil((grid.length * cellHeight) / 8) }).map((_, i) => (
+                          <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                            <path
+                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Hình số 4: Khoảng trắng dưới cùng với text TÂN TÂN TỐT NHẤT và hoa văn */}
+                  <div className="bg-white py-0 w-full">
+                    <div className="flex items-center justify-center gap-2 relative">
+                      <div className="absolute inset-0 flex items-center justify-center gap-1 overflow-hidden">
+                        {Array.from({ length: Math.ceil(100) }).map((_, i) => (
+                          <svg key={i} width="6" height="6" viewBox="0 0 6 6" className="text-yellow-500">
+                            <path
+                              d="M3 0 L3.5 2.5 L6 3 L3.5 3.5 L3 6 L2.5 3.5 L0 3 L2.5 2.5 Z"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        ))}
+                      </div>
+                      <span className="font-bold text-[8px] relative z-10 bg-white px-2">TÂN TÂN TỐT NHẤT</span>
+                    </div>
                   </div>
                 </motion.div>
               )
